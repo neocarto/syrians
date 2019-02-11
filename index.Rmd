@@ -1,0 +1,365 @@
+---
+title: "Be suspicious of maps, not of migrants"
+date: "Dec. 12, 2018"
+author: Françoise BAHOKEN & Nicolas LAMBERT
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    thumbnails: false
+    lightbox: true
+    gallery: true
+    highlight: tango
+---
+
+<link rel="stylesheet" type="text/css" media="all" href="css/style.css" />
+
+
+<h3>
+Do the maps tell you the truth or are they images to be used with extreme caution? The following demonstration is designed to sharpen your critical thinking skills.  It deals with the so-called "migration crisis" in Europe, with the example of Syrian migration in 2015. judge for yourself...
+</h3>
+
+<iframe width="800" height="450" src="https://www.youtube.com/embed/RDwn5Qzq6Fc" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+
+# R Packages
+
+Package loading.
+
+```{r eval = TRUE}
+library("sf")
+library("countrycode")
+library("readxl")
+library("cartography")
+```
+
+
+# Data download, import & handling
+
+Statistical data are from United Nations, Department of Economic and Social Affairs, Population Division (2017). It concern international migration between all the countries of the world at several dates. At this stage, the first step consists in selecting the year 2015 and the Syrian nationality and joining them with the basemap coming from the Natural Earth site.
+
+Data sources
+
+* migrant stocks: http://www.un.org/en/development/desa/population/migration/data/estimates2/estimates17.shtml
+
+* population: https://data.worldbank.org/indicator/sp.pop.totl
+
+* basemap: https://www.naturalearthdata.com/
+
+```{r eval = FALSE}
+mapfile <- "http://www.naturalearthdata.com/http//www.naturalearthdata.com/download/50m/cultural/ne_50m_admin_0_countries.zip"
+migfile <- "http://www.un.org/en/development/desa/population/migration/data/estimates2/data/UN_MigrantStockByOriginAndDestination_2015.xlsx"
+popfile <- "http://api.worldbank.org/v2/en/indicator/SP.POP.TOTL?downloadformat=excel"
+
+# download world basemap
+download.file(url =mapfile, destfile = "data/countries.zip")
+unzip("data/countries.zip", exdir = "data", unzip = "internal")
+file.remove("data/countries.zip")
+
+# Downlad statistical data
+download.file(url=migfile, destfile="data/mig.xlsx")
+download.file(url=popfile, destfile="data/pop.xls")
+
+# import world countries
+countries <- st_read(dsn = "data/ne_50m_admin_0_countries.shp", stringsAsFactors = F)
+countries <- countries[,c("ADM0_A3", "ISO_A2","NAME_SORT","geometry")]
+colnames(countries) <- c("ISO3", "ISO2","name","geometry")
+
+# import migration data
+mig <- data.frame(read_excel("data/mig.xlsx", skip = 15, sheet = "Table 16"))
+mig$ISO3 <- countrycode(sourcevar = mig$X__2, origin = "country.name", destination = "iso3c")
+
+# import population data
+pop <-  data.frame(read_excel("data/pop.xls", skip = 3, sheet = "Data"))
+pop <- pop[,c("Country.Code","Country.Name","X2015")]
+colnames(pop) <- c("ISO3","name","pop2015")
+
+# merge countries geometries and mig data
+countries <- merge(countries[,c("ISO3", "ISO2","name")], mig[,-(1:5)], 
+                   by.x="ISO3", by.y="ISO3", all.x=TRUE)
+
+# merge countries geometries and pop data
+countries <- merge(countries, pop[,c("ISO3","pop2015")],by.x="ISO3", by.y="ISO3", all.x=TRUE)
+
+# modify col names with ISO3 codes
+coln <- countrycode(sourcevar = names(countries)[7:238], origin = "country.name",destination = "iso3c")
+names(countries)[7:238] <- coln
+names(countries)[48] <- "GGY"
+
+# Keep only syrians
+countries <- countries[,c("ISO3","name","SYR","pop2015","geometry")]
+colnames(countries)
+
+# export the layer
+st_write(countries, "data/countriesmig.geojson")
+
+```
+
+
+# Study area
+
+When we draw a map, an important step is to define the study area. Here, we choose the LAEA projection and a box focused on the european union.
+
+```{r eval = TRUE}
+# import
+countries <-  st_read(dsn = "data/countriesmig.geojson", quiet = TRUE)
+
+# Proj WGS84 => LAEA
+crs <- "+proj=laea +lat_0=52 +lon_0=10 +x_0=4321000 +y_0=3210000 +ellps=GRS80 +units=m +no_defs"
+countries <- st_transform(x = countries, crs = crs)
+
+# Bounding box
+extent <- c(2800000, 1340000, 6400000, 4800000)
+box <- st_as_sfc("SRID=3035;LINESTRING(2800000 1340000, 2800000 4800000, 6400000 4800000, 6400000 1340000, 2800000 1340000)")
+
+# plot
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border ="white", lwd = 0.5)
+plot(box, lwd=2, add=T)
+layoutLayer(title="Study Area", sources = "Natural Earth, 2018", author = "Lambert & Bahoken, 2018",scale=NULL)
+```
+
+# Cartographic template
+
+In this analysis, we seek to represent Syrian migration in the European Union. Thus, we select the 28 countries of the Union for which we will represent statistical information. At this stage, a first cartographic template can be displayed 
+
+```{r eval = TRUE}
+
+UEcode <- c("AUT", "BEL", "BGR", "CHE", "CYP", "CZE", "DEU", "DNK", "EST", "ESP", "FIN", "FRA",
+            "GRC", "HRV", "HUN", "IRL", "ISL", "ITA", "LIE", "LTU", "LUX", "LVA", "MKD",
+            "MLT", "NLD", "NOR", "POL", "PRT", "ROU", "SWE", "SVN", "SVK", "GBR")
+
+UE2015 <- countries[countries$ISO3 %in% UEcode,]
+
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, 
+     lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+layoutLayer(title="Cartographic Template", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+
+```
+
+# Syrian refugees towards Europe
+
+Then, we design a map representing the number of Syrian migrants in the countries of the European Union. On this map, we can see that the 3 most welcoming countries are Sweden, Germany and France.
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, 
+     lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+
+propSymbolsLayer(x = UE2015, var = "SYR",
+                 inches=0.5, col="#91591D",legend.frame = T, 
+                 legend.pos = "topright", legend.title.txt = "Number of persons")
+labelLayer(x = UE2015[UE2015$SYR > 10000,], txt="name", halo=T,cex=1)
+layoutLayer(title="Syrians refugees in Europe, 2015", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+# In share of pop
+
+If we consider the number of Syrians hosted in proportion to the population, the main host countries are Sweden, Norway, Denmark, Cyprus and Malta. 
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+UE2015$rate <- (UE2015$SYR / UE2015$pop)*10000
+var <- UE2015$rate 
+breaks <- getBreaks(v = var, nclass = 6, method = "quantile")
+cols <- carto.pal(pal1 = "blue.pal", n1 = 3, pal2 = "red.pal", n2 = 3)
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+choroLayer(x = UE2015, var = "rate", breaks = breaks, col = cols, border = "grey40",
+           add = TRUE, legend.pos = "topright", legend.title.txt = "Nb of syriens\nper 10 000 inh.",
+           legend.values.rnd = 2)
+labelLayer(x = UE2015[UE2015$rate > 7,], txt="name", halo=T,cex=1)
+layoutLayer(title="Syrians refugees in Europe, 2015", sources = "Natural Earth, World Bank, United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+# What about sizes?
+
+What would happen if the size of the circles were changed?
+
+## Small
+
+With small circles, the map suggests that the number of Syrian migrants arriving in Europe is very low. 
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+size <- 0.1
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", inches=size, col="#91591D",legend.frame = T, legend.pos = "topright", legend.title.txt = "Number of persons")
+layoutLayer(title="Syrians refugees in Europe, 2015", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+## Medium
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+size <- 0.5
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", inches=size, col="#91591D",legend.frame = T, legend.pos = "topright", legend.title.txt = "Number of persons")
+layoutLayer(title="Syrians refugees in Europe, 2015", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+## Big
+
+With large circles, the map suggests that the number of Syrian migrants arriving in Europe is very substantial and can become problematic. 
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+size <- 1
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", inches=size, col="#91591D",legend.frame = T, legend.pos = "topright", legend.title.txt = "Number of persons")
+layoutLayer(title="Syrians refugees in Europe, 2015", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+# What about colors?
+
+“Mere color, unspoiled by meaning, and unallied with definite form, can speak to the soul in a thousand different ways. ” (Oscar Wilde). Actually, colors in cartography can suggest many things...
+
+## Peacefullness
+
+The color green is the symbol of balance and happiness. It is a colour that builds confidence.
+
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="#9dbadb", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", inches=0.5, col="#bbe5b7",legend.frame = T, legend.pos = "topright")
+layoutLayer(title="PEACEFULNESS", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+## Warning
+
+The red is the color of all controversies. It evokes danger and aggressiveness, but also love and passion. Red never leaves you indifferent. 
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="black", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", inches=0.5, col="red",legend.frame = T, legend.pos = "topright")
+layoutLayer(title="WARNING", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+
+```
+
+# What about words?
+
+Sur une carte, les mots sont très important. Changer un seul mot peu changer complètement le point de vue, l'intention de la carte. 
+
+## Welcome
+
+Here, the words "refugees", "exiles" and "welcome" turn the map into a map in favour of welcoming Syrian migrants.
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", col="#91591D",legend.frame = T, inches=0.5, legend.pos = "topright", legend.title.txt = "Number of Syrian exiles welcomed\nin European countries")
+layoutLayer(title="REFUGEES WELCOME", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+## Not Welcome
+
+Here, the words "invasion", "illegal" turn the map into a map against the reception of Syrian migrants.
+
+```{r eval = TRUE}
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", col="#91591D",legend.frame = T, inches=0.5, legend.pos = "topright",legend.title.txt = "Number of Syrian illegal immigrants")
+layoutLayer(title="THE BIG INVASION", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+# If we combine color, size & words...
+
+If we combine colors, size and words, we can design two completely different maps with contrasting messages. It should be recalled that these two maps strictly follow the rules of graphic semiology and have been made from the same data. 
+
+## :-)
+
+```{r eval = TRUE}
+
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="#9dbadb", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", col="#bbe5b7",legend.frame = T, inches=0.1, legend.pos = "topright", legend.title.txt = "Number of Syrian exiles welcomed\nin European countries", legend.style="e")
+layoutLayer(title="REFUGEES WELCOME", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+## :-(
+
+```{r eval = TRUE}
+
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border =NA, lwd = 0.5, xlim = c(extent[1], extent[3]), ylim = c(extent[2],extent[4]))
+plot(UE2015$geometry, col="black", add=T, border="white")
+propSymbolsLayer(x = UE2015, var = "SYR", col="red",legend.frame = T, inches=1, legend.pos = "topright",legend.title.txt = "Number of Syrian illegal immigrants")
+layoutLayer(title="THE BIG INVASION", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+
+# What about geographical extent?
+
+So far, we have  considered Syrian migration only to the countries of the European Union. But was that relevant? Let's change the geographical scope...
+
+```{r eval = TRUE}
+extent <- c(2800000, 300000, 8200000, 4800000)
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border ="white", 
+     lwd = 0.5, xlim = extent[c(1,3)], ylim = extent[c(2,4)])
+
+plot(UE2015$geometry, col="#f7ceb2", add=T, border=NA)
+
+plot(countries$geometry[countries$name=="Syrian Arab Republic"], col="#91591D", add=T)
+text("EUROPE",x = 4156169, y=2845867, cex = 1.5)
+text("SYRIA",x = 6896775, y=1333590, cex = 1.5)
+
+layoutLayer(title="Syria & Europe", sources = "Natural Earth, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+... and reproduce the map.
+
+```{r eval = TRUE}
+migrants <- countries[countries$ISO3 != "SYR",]
+fixmax <- max(migrants$SYR, na.rm=T)
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border ="white", 
+     lwd = 0.5, xlim = extent[c(1,3)], ylim = extent[c(2,4)])
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+
+propSymbolsLayer(x = migrants, var = "SYR",
+                 inches=1.3, col="#91591D", 
+                 legend.pos = NA, fixmax=fixmax)
+
+labelLayer(x = migrants[migrants$SYR > 100000,], txt="name", halo=T,cex=1.3)
+
+layoutLayer(title="Syrians refugees in Europe, 2015", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+The map speaks for itself. The main receiving countries for Syrian migrants are not in Europe but in neighboring countries. If there is a migration crisis, it is therefore not in Europe. And the map is even more meaningful if you add 7.6 million internally displaced persons in Syria.
+
+```{r eval = TRUE}
+interne <- 7600000
+countries$SYR[countries$ISO3=="SYR"] <- interne
+deplaces <- countries[countries$ISO3 %in% c("SYR","CAN"),]
+
+par(mar = c(0,0,1.2,0))
+plot(st_geometry(countries), col = "#e5e1d5", border ="white", 
+     lwd = 0.5, xlim = extent[c(1,3)], ylim = extent[c(2,4)])
+plot(UE2015$geometry, col="#f7ceb2", add=T, border="white")
+propSymbolsLayer(x = deplaces, var = "SYR",
+                 inches=1.3, col="#fc951650", border="#fc951650", lwd=0.1,
+                 legend.pos = NA, fixmax=fixmax)
+
+propSymbolsLayer(x = migrants, var = "SYR",
+                 inches=1.3, col="#91591D", 
+                 legend.pos = NA, fixmax=fixmax)
+
+labelLayer(x = migrants[migrants$SYR > 100000,], txt="name", halo=T,cex=1.3)
+text("+7.6 million internally displaced persons in Syria",x = 4843332, y = -100931.1, cex = 1, pos = 1, col = "#8e4708")
+layoutLayer(title="Syrians refugees in Europe, 2015", sources = "Natural Earth & United Nations, 2018", author = "Lambert & Bahoken, 2018",scale=500)
+```
+
+In summary, be suspicious of maps, not of migrants.
